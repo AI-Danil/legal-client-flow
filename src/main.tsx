@@ -104,6 +104,7 @@ function readSessionClients() {
 
   try {
     const parsed = JSON.parse(stored) as Partial<Client>[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return seedClients;
     return parsed.map(normalizeClient);
   } catch {
     return seedClients;
@@ -255,7 +256,10 @@ function App() {
   }, [clients, query, statusFilter]);
 
   const selectedClient =
-    clients.find((client) => client.id === selectedClientId) ?? filteredClients[0] ?? clients[0];
+    clients.find((client) => client.id === selectedClientId) ??
+    filteredClients[0] ??
+    clients[0] ??
+    seedClients[0];
 
   const newMatterShare = clients.length ? Math.round((counters.new / clients.length) * 100) : 0;
 

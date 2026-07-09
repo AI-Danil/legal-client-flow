@@ -257,6 +257,7 @@ h2 {
 }
 
 .field-error {
+  grid-column: 2 / 3;
   margin-top: -4px;
   color: #b3261e;
   font-size: 12.5px;
@@ -705,6 +706,10 @@ dd {
   .client-form,
   .security-grid {
     grid-template-columns: 1fr;
+  }
+
+  .field-error {
+    grid-column: 1;
   }
 
   .search-box {
