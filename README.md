@@ -30,6 +30,8 @@ npm run dev
 
 В проекте есть `vercel.json` и `netlify.toml` с security headers. CSP разрешает исходящие запросы только на self и типовые webhook-домены Make/Zapier/n8n. Если используется другой webhook-домен, его нужно добавить в `connect-src`.
 
+`connect-src` в `vercel.json`/`netlify.toml` разрешает `https://*.n8n.cloud` и `https://*.app.n8n.cloud` как wildcard-поддомены — это шире, чем точные хосты Make/Zapier рядом, и в проде стоит сузить их до конкретного n8n-инстанса деплоя.
+
 Подробные шаги публикации: `DEPLOYMENT.md`.
 
 ## Лог для отклика

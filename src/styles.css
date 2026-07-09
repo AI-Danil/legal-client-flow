@@ -246,6 +246,23 @@ h2 {
   gap: 8px;
 }
 
+.security-disclaimer {
+  border: 1px dashed #b9c7c1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #52645f;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.field-error {
+  margin-top: -4px;
+  color: #b3261e;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
 .section-title {
   grid-column: 1 / -1;
   gap: 10px;

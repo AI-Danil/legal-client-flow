@@ -130,6 +130,13 @@ function maskPhone(phone: string) {
   return `+7 *** ***-**-${tail}`;
 }
 
+const phonePattern = /^[+()\d][\d\s()-]{9,}$/;
+
+function isValidPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return phonePattern.test(phone.trim()) && digits.length >= 10;
+}
+
 function nextActionFor(status: ClientStatus) {
   if (status === "new") return "Связаться в течение 15 минут и уточнить суть дела";
   if (status === "in_progress") return "Проверить ближайший дедлайн и запросить недостающие документы";
@@ -177,6 +184,7 @@ function App() {
   const [notificationLog, setNotificationLog] = useState(
     "Данные хранятся только в sessionStorage. Внешняя отправка выключена.",
   );
+  const [phoneError, setPhoneError] = useState("");
 
   useEffect(() => {
     sessionStorage.setItem(clientsStorageKey, JSON.stringify(clients));
@@ -235,6 +243,12 @@ function App() {
     const trimmedName = form.name.trim();
     const trimmedPhone = form.phone.trim();
     if (!trimmedName || !trimmedPhone) return;
+
+    if (!isValidPhone(trimmedPhone)) {
+      setPhoneError("Введите телефон в формате +7 900 000-00-00 (минимум 10 цифр).");
+      return;
+    }
+    setPhoneError("");
 
     const nextClient: Client = {
       id: crypto.randomUUID(),
@@ -306,6 +320,7 @@ function App() {
 
   const handleProtectedCopy = (event: React.ClipboardEvent<HTMLElement>) => {
     if (!privacyEnabled || !copyGuardEnabled) return;
+    if (!(event.target instanceof HTMLElement) || !event.target.closest(".protected-text")) return;
 
     event.preventDefault();
     event.clipboardData.setData("text/plain", "Копирование PII отключено в privacy mode.");
@@ -416,12 +431,17 @@ function App() {
             Телефон
             <input
               value={form.phone}
-              onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              onChange={(event) => {
+                setForm({ ...form, phone: event.target.value });
+                if (phoneError) setPhoneError("");
+              }}
               placeholder="+7 900 000-00-00"
               autoComplete="off"
               inputMode="tel"
+              aria-invalid={Boolean(phoneError)}
             />
           </label>
+          {phoneError && <p className="field-error">{phoneError}</p>}
 
           <label>
             Тип дела
@@ -464,6 +484,12 @@ function App() {
             </div>
           </div>
 
+          <p className="security-disclaimer">
+            Это UX-слой приватности на клиенте (маскирование, copy guard), а не серверная
+            защита данных: любой, у кого есть доступ к этой вкладке, может выключить
+            Privacy или прочитать данные через DevTools.
+          </p>
+
           <div className="security-grid">
             <label className="check-row">
               <input
@@ -495,7 +521,7 @@ function App() {
                 checked={sendFullPii}
                 onChange={(event) => setSendFullPii(event.target.checked)}
               />
-              <span>Отправлять полный телефон в webhook</span>
+              <span>Отправлять полное имя и телефон в webhook</span>
             </label>
           </div>
 
