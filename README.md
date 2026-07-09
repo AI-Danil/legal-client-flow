@@ -30,6 +30,8 @@ npm run dev
 
 В проекте есть `vercel.json` и `netlify.toml` с security headers. CSP разрешает исходящие запросы только на self и типовые webhook-домены Make/Zapier/n8n. Если используется другой webhook-домен, его нужно добавить в `connect-src`.
 
+Подробные шаги публикации: `DEPLOYMENT.md`.
+
 ## Лог для отклика
 
 Стек: React + Vite + TypeScript. Выбран, потому что за 2-3 часа позволяет быстро собрать живой продуктовый прототип без backend-зависимости, а данные можно хранить в session-only режиме и легко заменить на Supabase/Firebase позже.
