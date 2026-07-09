@@ -78,6 +78,8 @@ const seedClients: Client[] = [
 
 const clientsStorageKey = "legal-client-flow.secure-session-clients";
 const webhookStorageKey = "legal-client-flow.secure-session-webhook";
+const tgTokenStorageKey = "legal-client-flow.secure-session-tg-token";
+const tgChatStorageKey = "legal-client-flow.secure-session-tg-chat";
 const legacyClientsStorageKey = "legal-client-flow.clients";
 const legacyWebhookStorageKey = "legal-client-flow.webhook-url";
 
@@ -143,6 +145,12 @@ function nextActionFor(status: ClientStatus) {
   return "Запросить отзыв и предложить дальнейшее сопровождение";
 }
 
+function clientNotificationText(client: Client, sendFullPii: boolean) {
+  const name = sendFullPii ? client.name : maskName(client.name);
+  const phone = sendFullPii ? client.phone : maskPhone(client.phone);
+  return `Новый клиент: ${name}, ${phone}, дело: ${client.matterType}, статус: ${statusMeta[client.status].label}`;
+}
+
 function webhookSafePayload(client: Client, sendFullPii: boolean) {
   return {
     event: "client_added",
@@ -155,11 +163,11 @@ function webhookSafePayload(client: Client, sendFullPii: boolean) {
       matter_type: client.matterType,
       created_at: client.createdAt,
     },
-    message: sendFullPii
-      ? `Новый клиент: ${client.name}, ${client.phone}, статус: ${statusMeta[client.status].label}`
-      : `Новый клиент: ${maskName(client.name)}, ${maskPhone(client.phone)}, статус: ${statusMeta[client.status].label}`,
+    message: clientNotificationText(client, sendFullPii),
   };
 }
+
+const telegramTokenPattern = /^\d+:[A-Za-z0-9_-]{30,}$/;
 
 function App() {
   const [clients, setClients] = useState<Client[]>(readSessionClients);
@@ -174,6 +182,12 @@ function App() {
   const [query, setQuery] = useState("");
   const [webhookUrl, setWebhookUrl] = useState(
     () => sessionStorage.getItem(webhookStorageKey) ?? "",
+  );
+  const [tgToken, setTgToken] = useState(
+    () => sessionStorage.getItem(tgTokenStorageKey) ?? "",
+  );
+  const [tgChatId, setTgChatId] = useState(
+    () => sessionStorage.getItem(tgChatStorageKey) ?? "",
   );
   const [form, setForm] = useState({
     name: "",
@@ -193,6 +207,14 @@ function App() {
   useEffect(() => {
     sessionStorage.setItem(webhookStorageKey, webhookUrl);
   }, [webhookUrl]);
+
+  useEffect(() => {
+    sessionStorage.setItem(tgTokenStorageKey, tgToken);
+  }, [tgToken]);
+
+  useEffect(() => {
+    sessionStorage.setItem(tgChatStorageKey, tgChatId);
+  }, [tgChatId]);
 
   useEffect(() => {
     localStorage.removeItem(legacyClientsStorageKey);
@@ -262,27 +284,17 @@ function App() {
     setClients((current) => [nextClient, ...current]);
     setSelectedClientId(nextClient.id);
     setForm({ name: "", phone: "", matterType: "", status: "new" });
-    await sendWebhook(nextClient);
+    await notifyAboutClient(nextClient);
   };
 
-  const sendWebhook = async (client: Client) => {
+  const sendWebhook = async (client: Client): Promise<string | null> => {
     const targetUrl = webhookUrl.trim();
-
-    if (!targetUrl) {
-      setNotificationLog(`Клиент ${maskName(client.name)} добавлен. Webhook не настроен.`);
-      return;
-    }
-
-    if (!webhookConfirmed) {
-      setNotificationLog("Webhook не отправлен: сначала включите явное согласие на внешнюю отправку.");
-      return;
-    }
+    if (!targetUrl) return null;
 
     try {
       const parsedUrl = new URL(targetUrl);
       if (parsedUrl.protocol !== "https:") {
-        setNotificationLog("Webhook заблокирован: разрешены только HTTPS-адреса.");
-        return;
+        return "webhook заблокирован (только HTTPS)";
       }
 
       await fetch(targetUrl, {
@@ -290,10 +302,104 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(webhookSafePayload(client, sendFullPii)),
       });
-      setNotificationLog(`Webhook отправлен: ${sendFullPii ? client.name : maskName(client.name)}`);
+      return "webhook отправлен";
     } catch {
-      setNotificationLog("Webhook не отправился. Проверьте URL, CORS или доступность сервиса.");
+      return "webhook не отправился (URL, CORS или сервис недоступен)";
     }
+  };
+
+  const sendTelegram = async (text: string): Promise<string | null> => {
+    const token = tgToken.trim();
+    const chatId = tgChatId.trim();
+    if (!token || !chatId) return null;
+
+    if (!telegramTokenPattern.test(token)) {
+      return "Telegram: токен не похож на токен бота (формат 123456:ABC...)";
+    }
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      const data = (await response.json()) as { ok?: boolean; description?: string };
+      if (data.ok) return "Telegram: уведомление доставлено";
+      return `Telegram: ошибка (${data.description ?? "неизвестная"})`;
+    } catch {
+      return "Telegram: запрос не прошёл. Проверьте токен и сеть.";
+    }
+  };
+
+  const notifyAboutClient = async (client: Client) => {
+    const clientLabel = sendFullPii ? client.name : maskName(client.name);
+    const hasChannels = Boolean(webhookUrl.trim() || (tgToken.trim() && tgChatId.trim()));
+
+    if (!hasChannels) {
+      setNotificationLog(`Клиент ${maskName(client.name)} добавлен. Внешние уведомления не настроены.`);
+      return;
+    }
+
+    if (!webhookConfirmed) {
+      setNotificationLog("Уведомления не отправлены: сначала включите явное согласие на внешнюю отправку.");
+      return;
+    }
+
+    const text = clientNotificationText(client, sendFullPii);
+    const results = (await Promise.all([sendWebhook(client), sendTelegram(text)])).filter(
+      (result): result is string => result !== null,
+    );
+    setNotificationLog(`Клиент ${clientLabel} добавлен. ${results.join(". ")}.`);
+  };
+
+  const detectChatId = async () => {
+    const token = tgToken.trim();
+    if (!token) {
+      setNotificationLog("Telegram: сначала введите токен бота.");
+      return;
+    }
+    if (!telegramTokenPattern.test(token)) {
+      setNotificationLog("Telegram: токен не похож на токен бота (формат 123456:ABC...).");
+      return;
+    }
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+      const data = (await response.json()) as {
+        ok?: boolean;
+        description?: string;
+        result?: { message?: { chat?: { id: number } } }[];
+      };
+      if (!data.ok) {
+        setNotificationLog(`Telegram: ошибка (${data.description ?? "проверьте токен"}).`);
+        return;
+      }
+      const chat = [...(data.result ?? [])].reverse().find((update) => update.message?.chat?.id)
+        ?.message?.chat;
+      if (chat) {
+        setTgChatId(String(chat.id));
+        setNotificationLog(`Telegram: chat ID определён (${chat.id}).`);
+      } else {
+        setNotificationLog("Telegram: напишите боту любое сообщение и нажмите «Определить» ещё раз.");
+      }
+    } catch {
+      setNotificationLog("Telegram: запрос не прошёл. Проверьте токен и сеть.");
+    }
+  };
+
+  const sendTelegramTest = async () => {
+    if (!tgToken.trim() || !tgChatId.trim()) {
+      setNotificationLog("Telegram: введите токен бота и chat ID.");
+      return;
+    }
+    if (!webhookConfirmed) {
+      setNotificationLog("Telegram: сначала включите явное согласие на внешнюю отправку.");
+      return;
+    }
+    const result = await sendTelegram(
+      "Тест: Legal Client Flow подключён. Уведомления о новых клиентах будут приходить сюда.",
+    );
+    setNotificationLog(result ?? "Telegram: введите токен бота и chat ID.");
   };
 
   const updateStatus = (clientId: string, status: ClientStatus) => {
@@ -513,7 +619,7 @@ function App() {
                 checked={webhookConfirmed}
                 onChange={(event) => setWebhookConfirmed(event.target.checked)}
               />
-              <span>Разрешить внешний webhook</span>
+              <span>Разрешить внешние уведомления (webhook и Telegram)</span>
             </label>
             <label className="check-row">
               <input
@@ -535,6 +641,43 @@ function App() {
               autoComplete="off"
             />
           </label>
+
+          <label>
+            Telegram bot token
+            <input
+              value={tgToken}
+              onChange={(event) => setTgToken(event.target.value)}
+              placeholder="123456789:AAE0abc..."
+              autoComplete="off"
+              type="password"
+            />
+          </label>
+
+          <label>
+            Telegram chat ID
+            <input
+              value={tgChatId}
+              onChange={(event) => setTgChatId(event.target.value)}
+              placeholder="Напишите боту /start и нажмите «Определить»"
+              autoComplete="off"
+            />
+          </label>
+
+          <div className="inline-actions">
+            <button className="ghost-button" type="button" onClick={detectChatId}>
+              <Search size={16} />
+              Определить chat ID
+            </button>
+            <button className="ghost-button" type="button" onClick={sendTelegramTest}>
+              <Send size={16} />
+              Тест в Telegram
+            </button>
+          </div>
+
+          <p className="security-hint">
+            Токен хранится только в sessionStorage этой вкладки и уходит только в
+            api.telegram.org. Используйте тестового бота, а не рабочего.
+          </p>
 
           <div className="notification-status" role="status">
             <Bell size={17} />

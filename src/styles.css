@@ -263,6 +263,18 @@ h2 {
   font-weight: 700;
 }
 
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.security-hint {
+  color: #71837e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .section-title {
   grid-column: 1 / -1;
   gap: 10px;

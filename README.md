@@ -12,6 +12,7 @@
 - copy guard в privacy mode;
 - хранение данных в `sessionStorage`, без долговременного `localStorage`;
 - бонус: webhook-уведомление при добавлении клиента для Make, n8n, Zapier или собственного backend endpoint;
+- бонус: Telegram-уведомления — достаточно вставить токен тестового бота, определить chat ID одной кнопкой и отправить тест;
 - security headers для Vercel/Netlify: CSP, Referrer-Policy, Permissions-Policy, X-Frame-Options.
 
 ## Запуск
