@@ -2,13 +2,13 @@ import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bell,
-  BriefcaseBusiness,
-  CheckCircle2,
   CirclePlus,
   ClipboardList,
+  Clock3,
   Eye,
   EyeOff,
   FileText,
+  History,
   LockKeyhole,
   RotateCw,
   Search,
@@ -21,6 +21,11 @@ import "./styles.css";
 type ClientStatus = "new" | "in_progress" | "closed";
 type StatusFilter = ClientStatus | "all";
 
+type HistoryEvent = {
+  at: string;
+  text: string;
+};
+
 type Client = {
   id: string;
   name: string;
@@ -28,6 +33,7 @@ type Client = {
   status: ClientStatus;
   matterType: string;
   createdAt: string;
+  history: HistoryEvent[];
 };
 
 const statusMeta: Record<
@@ -49,6 +55,7 @@ const seedClients: Client[] = [
     status: "new",
     matterType: "Семейный спор",
     createdAt: "2026-07-09T09:10:00.000Z",
+    history: [{ at: "2026-07-09T09:10:00.000Z", text: "Заявка создана со статусом «Новый»" }],
   },
   {
     id: "client-2",
@@ -57,6 +64,10 @@ const seedClients: Client[] = [
     status: "in_progress",
     matterType: "Договор поставки",
     createdAt: "2026-07-09T10:24:00.000Z",
+    history: [
+      { at: "2026-07-09T10:24:00.000Z", text: "Заявка создана со статусом «Новый»" },
+      { at: "2026-07-09T11:02:00.000Z", text: "Статус изменён: «Новый» → «В работе»" },
+    ],
   },
   {
     id: "client-3",
@@ -65,6 +76,11 @@ const seedClients: Client[] = [
     status: "closed",
     matterType: "Наследство",
     createdAt: "2026-07-08T14:42:00.000Z",
+    history: [
+      { at: "2026-07-08T14:42:00.000Z", text: "Заявка создана со статусом «Новый»" },
+      { at: "2026-07-08T15:30:00.000Z", text: "Статус изменён: «Новый» → «В работе»" },
+      { at: "2026-07-09T12:15:00.000Z", text: "Статус изменён: «В работе» → «Закрыт»" },
+    ],
   },
   {
     id: "client-4",
@@ -73,6 +89,10 @@ const seedClients: Client[] = [
     status: "in_progress",
     matterType: "Претензия к застройщику",
     createdAt: "2026-07-08T16:05:00.000Z",
+    history: [
+      { at: "2026-07-08T16:05:00.000Z", text: "Заявка создана со статусом «Новый»" },
+      { at: "2026-07-08T17:20:00.000Z", text: "Статус изменён: «Новый» → «В работе»" },
+    ],
   },
 ];
 
@@ -88,13 +108,24 @@ function isClientStatus(value: unknown): value is ClientStatus {
 }
 
 function normalizeClient(raw: Partial<Client>, index: number): Client {
+  const createdAt = raw.createdAt || new Date().toISOString();
+  const storedHistory = Array.isArray(raw.history)
+    ? raw.history.filter(
+        (event): event is HistoryEvent =>
+          Boolean(event) && typeof event.at === "string" && typeof event.text === "string",
+      )
+    : [];
+
   return {
     id: raw.id ?? `client-${index + 1}`,
     name: raw.name?.trim() || "Клиент без имени",
     phone: raw.phone?.trim() || "+7 *** ***-**-**",
     status: isClientStatus(raw.status) ? raw.status : "new",
     matterType: raw.matterType?.trim() || "Юридическая консультация",
-    createdAt: raw.createdAt || new Date().toISOString(),
+    createdAt,
+    history: storedHistory.length
+      ? storedHistory
+      : [{ at: createdAt, text: "Заявка создана" }],
   };
 }
 
@@ -138,6 +169,17 @@ const phonePattern = /^[+()\d][\d\s()-]{9,}$/;
 function isValidPhone(phone: string) {
   const digits = phone.replace(/\D/g, "");
   return phonePattern.test(phone.trim()) && digits.length >= 10;
+}
+
+function waitingMinutes(createdAt: string, now: number) {
+  return Math.max(0, Math.floor((now - new Date(createdAt).getTime()) / 60000));
+}
+
+function waitingLabel(minutes: number) {
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ч`;
+  return `${Math.floor(hours / 24)} дн`;
 }
 
 function nextActionFor(status: ClientStatus) {
@@ -200,6 +242,13 @@ function App() {
     "Данные хранятся только в sessionStorage. Внешняя отправка выключена.",
   );
   const [phoneError, setPhoneError] = useState("");
+  const [duplicateOverride, setDuplicateOverride] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     sessionStorage.setItem(clientsStorageKey, JSON.stringify(clients));
@@ -274,15 +323,32 @@ function App() {
       setPhoneError("Введите телефон в формате +7 900 000-00-00 (минимум 10 цифр).");
       return;
     }
-    setPhoneError("");
 
+    const phoneDigits = trimmedPhone.replace(/\D/g, "");
+    const duplicate = clients.find(
+      (client) => client.phone.replace(/\D/g, "") === phoneDigits,
+    );
+    if (duplicate && duplicateOverride !== phoneDigits) {
+      setDuplicateOverride(phoneDigits);
+      setPhoneError(
+        `Клиент с таким телефоном уже есть: ${maskName(duplicate.name)}. Нажмите «Добавить клиента» ещё раз, чтобы всё равно создать.`,
+      );
+      return;
+    }
+    setPhoneError("");
+    setDuplicateOverride(null);
+
+    const createdAt = new Date().toISOString();
     const nextClient: Client = {
       id: crypto.randomUUID(),
       name: trimmedName,
       phone: trimmedPhone,
       matterType: form.matterType.trim() || "Юридическая консультация",
       status: form.status,
-      createdAt: new Date().toISOString(),
+      createdAt,
+      history: [
+        { at: createdAt, text: `Заявка создана со статусом «${statusMeta[form.status].label}»` },
+      ],
     };
 
     setClients((current) => [nextClient, ...current]);
@@ -354,6 +420,9 @@ function App() {
       (result): result is string => result !== null,
     );
     setNotificationLog(`Клиент ${clientLabel} добавлен. ${results.join(". ")}.`);
+    if (results.length) {
+      appendHistory(client.id, `Уведомления: ${results.join("; ")}`);
+    }
   };
 
   const detectChatId = async () => {
@@ -406,9 +475,32 @@ function App() {
     setNotificationLog(result ?? "Telegram: введите токен бота и chat ID.");
   };
 
+  const appendHistory = (clientId: string, text: string) => {
+    setClients((current) =>
+      current.map((client) =>
+        client.id === clientId
+          ? { ...client, history: [...client.history, { at: new Date().toISOString(), text }] }
+          : client,
+      ),
+    );
+  };
+
   const updateStatus = (clientId: string, status: ClientStatus) => {
     setClients((current) =>
-      current.map((client) => (client.id === clientId ? { ...client, status } : client)),
+      current.map((client) => {
+        if (client.id !== clientId || client.status === status) return client;
+        return {
+          ...client,
+          status,
+          history: [
+            ...client.history,
+            {
+              at: new Date().toISOString(),
+              text: `Статус изменён: «${statusMeta[client.status].label}» → «${statusMeta[status].label}»`,
+            },
+          ],
+        };
+      }),
     );
   };
 
@@ -425,7 +517,14 @@ function App() {
     setClients(seedClients);
     setSelectedClientId(seedClients[0].id);
     setRevealedIds(new Set());
-    setNotificationLog("Демо-данные восстановлены. Локальные следы очищены.");
+    setStatusFilter("all");
+    setQuery("");
+    setForm({ name: "", phone: "", matterType: "", status: "new" });
+    setPhoneError("");
+    setDuplicateOverride(null);
+    setNotificationLog(
+      "Демо-данные восстановлены, фильтры и форма очищены. Настройки уведомлений сохранены.",
+    );
   };
 
   const handleProtectedCopy = (event: React.ClipboardEvent<HTMLElement>) => {
@@ -544,6 +643,7 @@ function App() {
               onChange={(event) => {
                 setForm({ ...form, phone: event.target.value });
                 if (phoneError) setPhoneError("");
+                if (duplicateOverride) setDuplicateOverride(null);
               }}
               placeholder="+7 900 000-00-00"
               autoComplete="off"
@@ -775,7 +875,19 @@ function App() {
                           ))}
                         </select>
                       </td>
-                      <td data-label="Следующий шаг">{nextActionFor(client.status)}</td>
+                      <td data-label="Следующий шаг">
+                        <div className="next-step-cell">
+                          <span>{nextActionFor(client.status)}</span>
+                          {client.status === "new" && (
+                            <span
+                              className={`wait-badge ${waitingMinutes(client.createdAt, now) > 15 ? "overdue" : ""}`}
+                            >
+                              <Clock3 size={12} />
+                              ждёт {waitingLabel(waitingMinutes(client.createdAt, now))}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td data-label="PII">
                         <button
                           className="icon-button"
@@ -831,6 +943,32 @@ function App() {
           <div className="next-action">
             <p>Следующий шаг</p>
             <strong>{nextActionFor(selectedClient.status)}</strong>
+            {selectedClient.status === "new" && (
+              <span
+                className={`wait-badge on-dark ${waitingMinutes(selectedClient.createdAt, now) > 15 ? "overdue" : ""}`}
+              >
+                <Clock3 size={12} />
+                ждёт {waitingLabel(waitingMinutes(selectedClient.createdAt, now))}
+              </span>
+            )}
+          </div>
+
+          <div className="history-block">
+            <p className="history-title">
+              <History size={15} />
+              История действий
+            </p>
+            <ul className="history-list">
+              {[...selectedClient.history].reverse().map((event, index) => (
+                <li key={`${event.at}-${index}`}>
+                  <span className="history-dot" />
+                  <div>
+                    <p>{event.text}</p>
+                    <time>{formatDate(event.at)}</time>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
 
           <button
@@ -849,6 +987,7 @@ function App() {
               setNotificationLog(
                 `Шаблон сообщения подготовлен для ${privacyEnabled ? maskName(selectedClient.name) : selectedClient.name}.`,
               );
+              appendHistory(selectedClient.id, "Подготовлен шаблон сообщения клиенту");
             }}
           >
             <Send size={17} />
