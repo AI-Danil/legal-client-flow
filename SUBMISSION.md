@@ -2,8 +2,8 @@
 
 ## Ссылки
 
-- Рабочий прототип: `вставить ссылку Vercel/Netlify после деплоя`
-- Репозиторий: `вставить ссылку GitHub/GitLab после push`
+- Рабочий прототип: https://legal-client-flow.netlify.app
+- Репозиторий: https://github.com/AI-Danil/legal-client-flow
 
 ## Что сделано
 
